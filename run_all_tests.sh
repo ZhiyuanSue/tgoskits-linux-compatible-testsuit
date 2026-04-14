@@ -532,8 +532,8 @@ run_linux_guest_qemu() {
         return 1
     fi
 
-    run_logged_command "$log_file" \
-        timeout "$LINUX_SYSTEM_TIMEOUT" \
+    run_logged_command_until_markers "$log_file" "$LINUX_SYSTEM_TIMEOUT" \
+        "@@@ STARRY_TEST_SUITE (PASS|FAIL) @@@|@@@ LINUX_SYSTEM_INIT_EXIT rc=[0-9]+ @@@" \
         "$qemu_bin" \
         -nographic \
         -no-reboot \
@@ -693,6 +693,69 @@ run_logged_command() {
     fi
 
     "$@" >"$log_file" 2>&1
+}
+
+terminate_process_group() {
+    local pgid="$1"
+    local signal="${2:-TERM}"
+    kill "-${signal}" "--" "-${pgid}" >/dev/null 2>&1 || true
+}
+
+run_logged_command_until_markers() {
+    local log_file="$1"
+    local timeout_secs="$2"
+    local marker_regex="$3"
+    shift 3
+
+    : >"$log_file"
+
+    setsid "$@" >"$log_file" 2>&1 &
+    local cmd_pid=$!
+    local tail_pid=""
+    local exit_code=0
+    local marker_seen=false
+    local start_ts
+    start_ts=$(date +%s)
+
+    if [[ -t 1 ]]; then
+        tail -n +1 -f "$log_file" &
+        tail_pid=$!
+    fi
+
+    while kill -0 "$cmd_pid" >/dev/null 2>&1; do
+        if grep -aqE "$marker_regex" "$log_file"; then
+            marker_seen=true
+            terminate_process_group "$cmd_pid" TERM
+            break
+        fi
+
+        if (( $(date +%s) - start_ts >= timeout_secs )); then
+            terminate_process_group "$cmd_pid" TERM
+            sleep 1
+            terminate_process_group "$cmd_pid" KILL
+            exit_code=124
+            break
+        fi
+
+        sleep 1
+    done
+
+    if [[ $exit_code -eq 0 ]]; then
+        wait "$cmd_pid" || exit_code=$?
+    else
+        wait "$cmd_pid" 2>/dev/null || true
+    fi
+
+    if [[ -n "$tail_pid" ]]; then
+        kill "$tail_pid" >/dev/null 2>&1 || true
+        wait "$tail_pid" 2>/dev/null || true
+    fi
+
+    if $marker_seen; then
+        return 0
+    fi
+
+    return "$exit_code"
 }
 
 compare_starry_with_linux_reference() {
