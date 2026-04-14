@@ -118,6 +118,7 @@ LINUX_SYSTEM_TOTAL_PASS=0; LINUX_SYSTEM_TOTAL_FAIL=0; LINUX_SYSTEM_TOTAL_SKIP=0
 STARRY_TOTAL_PASS=0; STARRY_TOTAL_FAIL=0; STARRY_TOTAL_SKIP=0
 STARRY_COMPAT_MISMATCH=0
 X86_64_MUSL_CC=""
+STARRY_SHELL_PREFIX="${STARRY_SHELL_PREFIX:-root@starry:/root #}"
 
 # ============================================================
 #  Argument Parsing
@@ -654,10 +655,15 @@ generate_starry_qemu_config() {
 
     local escaped_disk
     escaped_disk="$(escape_sed_replacement "$disk_img")"
+    local escaped_shell_prefix
+    local escaped_shell_cmd
+    escaped_shell_prefix="$(escape_sed_replacement "$STARRY_SHELL_PREFIX")"
+    escaped_shell_cmd="$(escape_sed_replacement "TERM=dumb /bin/run_syscall_tests.sh")"
 
     sed \
         -e "s|\"id=disk0,if=none,format=raw,file=.*\"|\"id=disk0,if=none,format=raw,file=${escaped_disk}\"|" \
-        -e 's|^shell_init_cmd = .*|shell_init_cmd = "/bin/run_syscall_tests.sh"|' \
+        -e "s|^shell_prefix = .*|shell_prefix = \"${escaped_shell_prefix}\"|" \
+        -e "s|^shell_init_cmd = .*|shell_init_cmd = \"${escaped_shell_cmd}\"|" \
         -e 's|^success_regex = .*|success_regex = ["(?m)^@@@ STARRY_TEST_SUITE PASS @@@\\\\s*$"]|' \
         -e 's|^fail_regex = .*|fail_regex = ["(?m)^@@@ STARRY_TEST_SUITE FAIL @@@\\\\s*$", "(?i)\\\\bpanic(?:ked)?\\\\b"]|' \
         -e "s|^timeout = .*|timeout = ${STARRY_TIMEOUT}|" \
@@ -1213,9 +1219,10 @@ phase2_starryos_tests() {
     info "Output will be captured to: $starry_output"
 
     set +e
-    run_logged_command "$starry_output" bash -lc "
+    run_logged_command_until_markers "$starry_output" "$STARRY_TIMEOUT" \
+        "@@@ STARRY_TEST_SUITE (PASS|FAIL) @@@|[Pp]anic([a-z]+)?" bash -lc "
         cd '$TGOSKITS_DIR'
-        timeout '$STARRY_TIMEOUT' cargo starry qemu --arch '$STARRY_ARCH' --qemu-config '$qemu_config'
+        cargo starry qemu --arch '$STARRY_ARCH' --qemu-config '$qemu_config'
     "
     qemu_exit_code=$?
     set -e
