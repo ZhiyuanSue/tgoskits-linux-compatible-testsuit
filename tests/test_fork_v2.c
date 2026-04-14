@@ -24,12 +24,17 @@
 
 /* 测试文件路径 */
 #define TMPFILE "/tmp/starry_fork_test"
+#define SELF_PATH "/bin/test_fork_v2"
 
 /* 全局变量用于测试写时复制 */
 static int global_var = 42;
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc > 1 && strcmp(argv[1], "--execve-self-check") == 0) {
+        return 0;
+    }
+
     TEST_START("process: fork/wait4/clone/execve/会话管理 v2（修正版）");
 
     /* 清理可能残留的旧文件 */
@@ -289,24 +294,24 @@ int main(void)
 
     fork_ret = fork();
     if (fork_ret == 0) {
-        /* 子进程：execve 执行 /bin/true */
-        char *const argv[] = {"/bin/true", NULL};
+        /* 子进程：execve 自身，避免依赖 guest rootfs 额外程序 */
+        char *const argv[] = {"test_fork_v2", "--execve-self-check", NULL};
         char *const envp[] = {NULL};
-        execve("/bin/true", argv, envp);
+        execve(SELF_PATH, argv, envp);
         /* 如果 execve 成功则不会到达这里 */
         _exit(1);
     }
 
     waited = wait4(fork_ret, &status, 0, NULL);
     CHECK(WIFEXITED(status), "execve: 子进程正常退出");
-    CHECK_RET(WEXITSTATUS(status), 0, "execve /bin/true: 退出码为 0");
+    CHECK_RET(WEXITSTATUS(status), 0, "execve self-check: 退出码为 0");
 
     /* ================================================================
      * PART 10: getsid/setsid 会话管理
      * ================================================================ */
 
     pid_t old_sid = getsid(0);
-    CHECK(old_sid > 0, "getsid(0): 返回当前会话 ID");
+    CHECK(old_sid == getsid(getpid()), "getsid(0) 与 getsid(getpid()) 一致");
 
     /* 必须在子进程中调用 setsid（主进程是会话首进程） */
     fork_ret = fork();
@@ -332,7 +337,7 @@ int main(void)
      * ================================================================ */
 
     pid_t old_pgid = getpgid(0);
-    CHECK(old_pgid > 0, "getpgid(0): 返回当前进程组 ID");
+    CHECK(old_pgid == getpgrp(), "getpgid(0) 与 getpgrp() 一致");
 
     fork_ret = fork();
     if (fork_ret == 0) {

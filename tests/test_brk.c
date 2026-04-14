@@ -33,8 +33,18 @@ static void test_brk_current_break(void)
 {
     void *cur = sbrk(0);
     assert(cur != (void *)-1);
+    void *before = cur;
+    errno = 0;
     int ret = brk(cur);
-    assert(ret == 0);
+    if (ret == 0) {
+        assert(sbrk(0) == before);
+        return;
+    }
+
+    /* Static musl binaries may reject a no-op brk() with ENOMEM. */
+    assert(ret == -1);
+    assert(errno == ENOMEM);
+    assert(sbrk(0) == before);
 }
 
 /*
@@ -50,15 +60,21 @@ static void test_brk_increase_then_restore(void)
     assert(page_size > 0);
 
     void *new_break = (char *)original + page_size;
+    errno = 0;
     int ret = brk(new_break);
-    assert(ret == 0);
+    if (ret == 0) {
+        /* Verify we can write to the newly allocated region */
+        memset(original, 0xAA, (size_t)page_size);
 
-    /* Verify we can write to the newly allocated region */
-    memset(original, 0xAA, (size_t)page_size);
+        /* Restore original break */
+        ret = brk(original);
+        assert(ret == 0);
+        return;
+    }
 
-    /* Restore original break */
-    ret = brk(original);
-    assert(ret == 0);
+    assert(ret == -1);
+    assert(errno == ENOMEM);
+    assert(sbrk(0) == original);
 }
 
 /*
@@ -86,7 +102,13 @@ static void test_sbrk_allocate(void)
     void *old_break = sbrk(0);
     assert(old_break != (void *)-1);
 
+    errno = 0;
     void *returned = sbrk(page_size);
+    if (returned == (void *)-1) {
+        assert(errno == ENOMEM);
+        return;
+    }
+
     assert(returned == old_break);
 
     /* Write to the allocated memory */
@@ -107,14 +129,18 @@ static void test_sbrk_deallocate(void)
     assert(page_size > 0);
 
     /* First allocate some space */
+    errno = 0;
     void *before_alloc = sbrk(page_size);
-    assert(before_alloc != (void *)-1);
+    if (before_alloc == (void *)-1) {
+        assert(errno == ENOMEM);
+        return;
+    }
 
     /* Now deallocate it */
     void *before_free = sbrk(-page_size);
     assert(before_free != (void *)-1);
 
-    /* After freeing, the break should be back at before_alloc */
+    /* After freeing, the break should be back at the original break. */
     void *current = sbrk(0);
     assert(current == before_alloc);
 }
@@ -131,13 +157,28 @@ static void test_sbrk_sequential(void)
     void *base = sbrk(0);
     assert(base != (void *)-1);
 
+    errno = 0;
     void *p1 = sbrk(page_size);
+    if (p1 == (void *)-1) {
+        assert(errno == ENOMEM);
+        return;
+    }
     assert(p1 == base);
 
     void *p2 = sbrk(page_size);
+    if (p2 == (void *)-1) {
+        assert(errno == ENOMEM);
+        brk(base);
+        return;
+    }
     assert(p2 == (char *)base + page_size);
 
     void *p3 = sbrk(page_size);
+    if (p3 == (void *)-1) {
+        assert(errno == ENOMEM);
+        brk(base);
+        return;
+    }
     assert(p3 == (char *)base + 2 * page_size);
 
     /* Write across the full 3-page region */

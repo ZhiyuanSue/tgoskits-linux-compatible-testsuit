@@ -17,7 +17,7 @@
  * Some musl cross toolchains do not expose statx() in <sys/stat.h>.
  * Fall back to the raw syscall while reusing the kernel UAPI layout.
  */
-#if !defined(__GLIBC__)
+#if !defined(__GLIBC__) && !defined(STATX_TYPE)
 #include <linux/stat.h>
 
 static int statx_compat(int dirfd, const char *pathname, int flags,
@@ -373,8 +373,14 @@ static void test_error_efault(void)
     char path[512];
     snprintf(path, sizeof(path), "%s/regfile.txt", basedir);
 
-    /* Passing NULL as statbuf should produce EFAULT */
-    ASSERT_ERR(stat(path, NULL), EFAULT);
+    /* libc stat(path, NULL) may segfault before reaching the kernel. */
+    errno = 0;
+    long rc = syscall(SYS_newfstatat, AT_FDCWD, path, NULL, 0);
+    if (rc != -1 || errno != EFAULT) {
+        fprintf(stderr, "FAIL %s:%d: raw newfstatat returned %ld errno=%d (%s), expected -1/EFAULT\n",
+                __FILE__, __LINE__, rc, errno, strerror(errno));
+        abort();
+    }
 }
 #pragma GCC diagnostic pop
 
@@ -411,8 +417,18 @@ static void test_error_eacces(void)
     assert(chmod(privdir, 0000) == 0);
 
     struct stat sb;
-    /* stat() needs search (execute) permission on all path components */
-    ASSERT_ERR(stat(filepath, &sb), EACCES);
+    /* Root may bypass directory search permission checks. */
+    errno = 0;
+    int rc = stat(filepath, &sb);
+    if (geteuid() == 0) {
+        ASSERT_OK(rc);
+    } else {
+        if (rc != -1 || errno != EACCES) {
+            fprintf(stderr, "FAIL %s:%d: stat(filepath, &sb) returned %d errno=%d (%s), expected -1/EACCES\n",
+                    __FILE__, __LINE__, rc, errno, strerror(errno));
+            abort();
+        }
+    }
 
     /* Restore permissions for cleanup */
     chmod(privdir, 0755);
