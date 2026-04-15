@@ -19,8 +19,12 @@
 static int create_test_file(void)
 {
     int fd = open(TEST_FILE, O_RDWR | O_CREAT | O_TRUNC, 0644);
-    if (fd >= 0)
-        write(fd, "hello world\n", 12);
+    if (fd >= 0) {
+        if (write(fd, "hello world\n", 12) != 12) {
+            close(fd);
+            return -1;
+        }
+    }
     return fd;
 }
 
@@ -33,8 +37,7 @@ int main(void)
     CHECK(fd >= 0, "ftruncate 正常截断: 打开文件");
     if (fd >= 0) {
         CHECK_RET(ftruncate(fd, 5), 0, "ftruncate(5) 成功");
-        off_t sz = lseek(fd, 0, SEEK_END);
-        CHECK_RET(sz, 5, "ftruncate(5) 后文件大小为 5");
+        CHECK_RET(lseek(fd, 0, SEEK_END), 5, "ftruncate(5) 后文件大小为 5");
         close(fd);
     }
     unlink(TEST_FILE);
@@ -54,8 +57,7 @@ int main(void)
     CHECK(fd >= 0, "ftruncate 截断为 0: 打开文件");
     if (fd >= 0) {
         CHECK_RET(ftruncate(fd, 0), 0, "ftruncate(0) 成功");
-        off_t sz = lseek(fd, 0, SEEK_END);
-        CHECK_RET(sz, 0, "ftruncate(0) 后文件大小为 0");
+        CHECK_RET(lseek(fd, 0, SEEK_END), 0, "ftruncate(0) 后文件大小为 0");
         close(fd);
     }
     unlink(TEST_FILE);
@@ -64,10 +66,9 @@ int main(void)
     fd = create_test_file();
     CHECK(fd >= 0, "pwrite 正常写入: 打开文件");
     if (fd >= 0) {
-        ssize_t n = pwrite(fd, "XY", 2, 5);
-        CHECK_RET(n, 2, "pwrite(fd, \"XY\", 2, 5) 写入 2 字节");
+        CHECK_RET(pwrite(fd, "XY", 2, 5), 2, "pwrite(fd, \"XY\", 2, 5) 写入 2 字节");
         char buf[13] = {0};
-        pread(fd, buf, 12, 0);
+        CHECK_RET(pread(fd, buf, 12, 0), 12, "pread 读回 12 字节");
         CHECK(memcmp(buf, "helloXYorld\n", 12) == 0, "pwrite 后偏移 5 处为 XY");
         close(fd);
     }
