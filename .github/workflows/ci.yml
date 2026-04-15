@@ -1,0 +1,95 @@
+name: syscall-testsuite
+
+on:
+  push:
+    branches: [main, master, dev]
+    paths:
+      - 'test_program/**'
+      - 'run_all_tests.sh'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main, master, dev]
+    paths:
+      - 'test_program/**'
+      - 'run_all_tests.sh'
+      - 'scripts/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+jobs:
+  # =============================================
+  # Linux 多架构测试（Phase 1）
+  # =============================================
+  linux_tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/rcore-os/tgoskits-container:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        starry_arch: [riscv64, x86_64, aarch64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install missing deps
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq libudev-dev pkg-config e2fsprogs 2>/dev/null || true
+
+      - name: Run Linux tests (--linux-only)
+        run: |
+          bash ./run_all_tests.sh --linux-only --starry-arch ${{ matrix.starry_arch }} --no-dep-check
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-logs-${{ matrix.starry_arch }}
+          path: |
+            logs/
+            build/
+          retention-days: 7
+
+  # =============================================
+  # StarryOS 测试（Phase 2）
+  # =============================================
+  starryos_tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/rcore-os/tgoskits-container:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        starry_arch: [riscv64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout tgoskits
+        uses: actions/checkout@v4
+        with:
+          repository: rcore-os/tgoskits
+          path: tgoskits
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install missing deps
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq libudev-dev pkg-config e2fsprogs 2>/dev/null || true
+
+      - name: Run StarryOS tests (--starry-only)
+        run: |
+          bash ./run_all_tests.sh --starry-only --starry-arch ${{ matrix.starry_arch }} \
+            --tgoskits $(pwd)/tgoskits --no-dep-check
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: starryos-logs-${{ matrix.starry_arch }}
+          path: |
+            logs/
+            build/
+          retention-days: 7

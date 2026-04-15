@@ -65,18 +65,35 @@ declare -a TEST_LDFLAGS=()    # extra link flags (e.g. "-lpthread")
 declare -a TEST_TIMEOUTS=()   # per-test timeout
 
 # Musl-based cross-compiler per architecture
-# Toolchain layout: <MUSL_CROSS_ROOT>/<arch>-linux-musl-cross/bin/<arch>-linux-musl-gcc
-MUSL_CROSS_ROOT="${MUSL_CROSS_ROOT:-/home/wyatt/package}"
-declare -A CROSS_CC=(
-    [x86_64]="${MUSL_CROSS_ROOT}/x86_64-linux-musl-cross/bin/x86_64-linux-musl-gcc"
-    [riscv64]="${MUSL_CROSS_ROOT}/riscv64-linux-musl-cross/bin/riscv64-linux-musl-gcc"
+# Auto-detect from PATH; can be overridden by setting CC_<ARCH> env vars
+# e.g., CC_x86_64=x86_64-linux-musl-gcc CC_riscv64=riscv64-linux-musl-gcc
+
+declare -A CROSS_CC_BASE=(
+    [x86_64]="x86_64-linux-musl-gcc"
+    [riscv64]="riscv64-linux-musl-gcc"
+    [aarch64]="aarch64-linux-musl-gcc"
+    [loongarch64]="loongarch64-linux-musl-gcc"
 )
 
+declare -A CROSS_CC=()
+for _arch in "${!CROSS_CC_BASE[@]}"; do
+    _envvar="CC_${_arch}"
+    if [[ -n "${!_envvar:-}" ]]; then
+        # User explicitly set
+        CROSS_CC[$_arch]="${!_envvar}"
+    else
+        # Use from PATH
+        CROSS_CC[$_arch]="${CROSS_CC_BASE[$_arch]}"
+    fi
+done
+unset _arch _envvar
+
 # QEMU user-mode emulator per architecture (for Linux cross-arch testing)
+# Try both with and without -static suffix
 declare -A QEMU_USER=(
-    [riscv64]="qemu-riscv64-static"
-    [aarch64]="qemu-aarch64-static"
-    [loongarch64]="qemu-loongarch64-static"
+    [riscv64]="qemu-riscv64"
+    [aarch64]="qemu-aarch64"
+    [loongarch64]="qemu-loongarch64"
 )
 
 # StarryOS target triple per architecture
