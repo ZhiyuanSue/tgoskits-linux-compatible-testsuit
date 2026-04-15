@@ -50,15 +50,15 @@ jobs:
           curl -fsSL "$ZIG_URL" | sudo tar -xJ -C /opt/
           sudo ln -sf /opt/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
 
-          for target in x86_64-linux-musl riscv64-linux-musl; do
-            arch="${target%%-*}"
-            wrapper="/usr/local/bin/${arch}-linux-musl-gcc"
-            cat > "$wrapper" <<WRAPPER
-#!/bin/bash
-exec zig cc -target ${target} -static "\$@"
-WRAPPER
-            chmod +x "$wrapper"
-          done
+          # Create wrapper for x86_64-linux-musl
+          echo '#!/bin/bash' > /usr/local/bin/x86_64-linux-musl-gcc
+          echo 'exec zig cc -target x86_64-linux-musl -static "$@"' >> /usr/local/bin/x86_64-linux-musl-gcc
+          chmod +x /usr/local/bin/x86_64-linux-musl-gcc
+
+          # Create wrapper for riscv64-linux-musl
+          echo '#!/bin/bash' > /usr/local/bin/riscv64-linux-musl-gcc
+          echo 'exec zig cc -target riscv64-linux-musl -static "$@"' >> /usr/local/bin/riscv64-linux-musl-gcc
+          chmod +x /usr/local/bin/riscv64-linux-musl-gcc
 
           echo "=== Verify ==="
           x86_64-linux-musl-gcc --version 2>&1 | head -1
@@ -123,15 +123,9 @@ WRAPPER
           curl -fsSL "$ZIG_URL" | sudo tar -xJ -C /opt/
           sudo ln -sf /opt/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
 
-          for target in riscv64-linux-musl; do
-            arch="${target%%-*}"
-            wrapper="/usr/local/bin/${arch}-linux-musl-gcc"
-            cat > "$wrapper" <<WRAPPER
-#!/bin/bash
-exec zig cc -target ${target} -static "\$@"
-WRAPPER
-            chmod +x "$wrapper"
-          done
+          echo '#!/bin/bash' > /usr/local/bin/riscv64-linux-musl-gcc
+          echo 'exec zig cc -target riscv64-linux-musl -static "$@"' >> /usr/local/bin/riscv64-linux-musl-gcc
+          chmod +x /usr/local/bin/riscv64-linux-musl-gcc
 
           riscv64-linux-musl-gcc --version 2>&1 | head -1
 
