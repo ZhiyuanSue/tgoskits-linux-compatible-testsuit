@@ -46,11 +46,13 @@ int main(void) {
         CHECK_RET(my_getrandom(buf, 0, 0), 0, "len=0 返回0");
     }
 
-    /* GRND_RANDOM flag：从 /dev/random 读取，返回值应大于 0 */
+    /* GRND_RANDOM flag：从 /dev/random 读取。
+     * 使用 GRND_NONBLOCK 避免在低熵环境（QEMU/早期启动）下阻塞。 */
     {
         unsigned char buf[16];
-        ssize_t n = my_getrandom(buf, sizeof(buf), GRND_RANDOM);
-        CHECK(n > 0, "GRND_RANDOM flag 正常工作");
+        ssize_t n = my_getrandom(buf, sizeof(buf), GRND_RANDOM | GRND_NONBLOCK);
+        CHECK(n > 0 || (n == -1 && errno == EAGAIN),
+              "GRND_RANDOM|GRND_NONBLOCK: 返回数据或 EAGAIN");
     }
 
     /* 无效 flags：0xFF 含有未定义位，Linux 内核拒绝并返回 EINVAL */
