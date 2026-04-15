@@ -19,12 +19,74 @@ on:
 
 jobs:
   # =============================================
-  # Linux 多架构测试（Phase 1）
+  # 公共步骤: 安装工具链
+  # =============================================
+  install_deps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            musl-tools \
+            qemu-user \
+            qemu-system-misc \
+            libudev-dev \
+            pkg-config \
+            e2fsprogs \
+            build-essential \
+            file \
+            wget \
+            curl
+
+      - name: Install musl cross-compilers
+        run: |
+          # musl.cc provides prebuilt musl cross toolchains
+          MUSL_URL="https://musl.cc"
+          for arch in x86_64 riscv64 aarch64; do
+            cmd="${arch}-linux-musl-gcc"
+            if ! command -v "$cmd" &>/dev/null; then
+              echo "Downloading ${arch}-linux-musl-cross..."
+              tarball="${arch}-cross.tgz"
+              wget -q "$MUSL_URL/$tarball" -O "/tmp/$tarball"
+              sudo tar -xzf "/tmp/$tarball" -C /opt/
+              rm -f "/tmp/$tarball"
+              echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
+            fi
+          done
+          # Verify
+          for arch in x86_64 riscv64 aarch64; do
+            "${arch}-linux-musl-gcc" --version | head -1
+          done
+
+      - name: Install Rust toolchain (for StarryOS)
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup target add \
+            x86_64-unknown-none \
+            riscv64gc-unknown-none-elf \
+            aarch64-unknown-none-softfloat
+
+      - name: Verify environment
+        run: |
+          echo "=== musl cross-compilers ==="
+          for arch in x86_64 riscv64 aarch64; do
+            which "${arch}-linux-musl-gcc" || echo "MISSING: ${arch}-linux-musl-gcc"
+          done
+          echo "=== QEMU ==="
+          qemu-x86_64 --version | head -1
+          qemu-riscv64 --version | head -1
+          qemu-system-riscv64 --version | head -1
+          echo "=== Rust ==="
+          rustc --version
+          cargo --version
+
+  # =============================================
+  # Phase 1: Linux 多架构测试
   # =============================================
   linux_tests:
+    needs: install_deps
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/rcore-os/tgoskits-container:latest
     strategy:
       fail-fast: false
       matrix:
@@ -33,10 +95,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install missing deps
+      - name: Setup musl cross-compilers
         run: |
-          apt-get update -qq
-          apt-get install -y -qq libudev-dev pkg-config e2fsprogs 2>/dev/null || true
+          MUSL_URL="https://musl.cc"
+          for arch in x86_64 riscv64 aarch64; do
+            if ! command -v "${arch}-linux-musl-gcc" &>/dev/null; then
+              tarball="${arch}-cross.tgz"
+              wget -q "$MUSL_URL/$tarball" -O "/tmp/$tarball"
+              sudo tar -xzf "/tmp/$tarball" -C /opt/
+              rm -f "/tmp/$tarball"
+              echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
+            fi
+          done
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools qemu-user e2fsprogs libudev-dev pkg-config file
 
       - name: Run Linux tests (--linux-only)
         run: |
@@ -53,18 +128,17 @@ jobs:
           retention-days: 7
 
   # =============================================
-  # StarryOS 测试（Phase 2）
+  # Phase 2: StarryOS 测试
   # =============================================
   starryos_tests:
+    needs: install_deps
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/rcore-os/tgoskits-container:latest
     strategy:
       fail-fast: false
       matrix:
         starry_arch: [riscv64]
     steps:
-      - name: Checkout
+      - name: Checkout testsuit
         uses: actions/checkout@v4
 
       - name: Checkout tgoskits
@@ -74,15 +148,37 @@ jobs:
           path: tgoskits
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Install missing deps
+      - name: Setup musl cross-compilers
         run: |
-          apt-get update -qq
-          apt-get install -y -qq libudev-dev pkg-config e2fsprogs 2>/dev/null || true
+          MUSL_URL="https://musl.cc"
+          for arch in x86_64 riscv64 aarch64; do
+            if ! command -v "${arch}-linux-musl-gcc" &>/dev/null; then
+              tarball="${arch}-cross.tgz"
+              wget -q "$MUSL_URL/$tarball" -O "/tmp/$tarball"
+              sudo tar -xzf "/tmp/$tarball" -C /opt/
+              rm -f "/tmp/$tarball"
+              echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
+            fi
+          done
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools qemu-user qemu-system-misc e2fsprogs libudev-dev pkg-config file
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup target add \
+            x86_64-unknown-none \
+            riscv64gc-unknown-none-elf \
+            aarch64-unknown-none-softfloat
 
       - name: Run StarryOS tests (--starry-only)
         run: |
           bash ./run_all_tests.sh --starry-only --starry-arch ${{ matrix.starry_arch }} \
             --tgoskits $(pwd)/tgoskits --no-dep-check
+        timeout-minutes: 30
 
       - name: Upload logs
         if: always()
