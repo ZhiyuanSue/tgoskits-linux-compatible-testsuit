@@ -101,7 +101,7 @@ jobs:
         with:
           repository: rcore-os/tgoskits
           path: tgoskits
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: dev
 
       - name: Install system packages
         run: |
