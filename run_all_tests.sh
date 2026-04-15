@@ -251,8 +251,11 @@ check_prerequisites() {
     # Check musl cross-compilers for available architectures
     for arch in "${!CROSS_CC[@]}"; do
         local cc="${CROSS_CC[$arch]}"
-        if [[ -x "$cc" ]]; then
-            ok "musl CC for $arch: $cc"
+        if [[ -z "$cc" ]]; then
+            warn "musl CC for $arch: not configured"
+            unset CROSS_CC[$arch]
+        elif command -v "$cc" &>/dev/null; then
+            ok "musl CC for $arch: $(command -v "$cc")"
         else
             warn "musl CC for $arch not found: $cc"
             unset CROSS_CC[$arch]
@@ -316,7 +319,7 @@ phase1_linux_tests() {
     local -a test_arches=()
     for arch in "${!CROSS_CC[@]}"; do
         local cc="${CROSS_CC[$arch]}"
-        if [[ ! -x "$cc" ]]; then
+        if [[ -z "$cc" ]] || ! command -v "$cc" &>/dev/null; then
             warn "Skipping $arch: $cc not found"
             continue
         fi
