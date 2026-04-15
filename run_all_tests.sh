@@ -64,37 +64,59 @@ declare -a TEST_SRCS=()       # source path  (e.g. "test_program/test_brk.c")
 declare -a TEST_LDFLAGS=()    # extra link flags (e.g. "-lpthread")
 declare -a TEST_TIMEOUTS=()   # per-test timeout
 
-# Musl-based cross-compiler per architecture
-# Auto-detect from PATH; can be overridden by setting CC_<ARCH> env vars
-# e.g., CC_x86_64=x86_64-linux-musl-gcc CC_riscv64=riscv64-linux-musl-gcc
-
-declare -A CROSS_CC_BASE=(
-    [x86_64]="x86_64-linux-musl-gcc"
-    [riscv64]="riscv64-linux-musl-gcc"
-    [aarch64]="aarch64-linux-musl-gcc"
-    [loongarch64]="loongarch64-linux-musl-gcc"
+# Cross-compiler per architecture
+# Priority: env CC_<arch> > musl variant > gnu variant > not available
+declare -A CROSS_CC_CANDIDATES=(
+    [x86_64]="x86_64-linux-musl-gcc:x86_64-linux-gnu-gcc"
+    [riscv64]="riscv64-linux-musl-gcc:riscv64-linux-gnu-gcc"
+    [aarch64]="aarch64-linux-musl-gcc:aarch64-linux-gnu-gcc"
+    [loongarch64]="loongarch64-linux-musl-gcc:loongarch64-linux-gnu-gcc"
 )
 
 declare -A CROSS_CC=()
-for _arch in "${!CROSS_CC_BASE[@]}"; do
+for _arch in "${!CROSS_CC_CANDIDATES[@]}"; do
     _envvar="CC_${_arch}"
     if [[ -n "${!_envvar:-}" ]]; then
-        # User explicitly set
         CROSS_CC[$_arch]="${!_envvar}"
     else
-        # Use from PATH
-        CROSS_CC[$_arch]="${CROSS_CC_BASE[$_arch]}"
+        # Try candidates in order (musl first, then gnu fallback)
+        IFS=':' read -ra _candidates <<< "${CROSS_CC_CANDIDATES[$_arch]}"
+        CROSS_CC[$_arch]=""
+        for _cand in "${_candidates[@]}"; do
+            if command -v "$_cand" &>/dev/null; then
+                CROSS_CC[$_arch]="$_cand"
+                break
+            fi
+        done
     fi
 done
-unset _arch _envvar
+unset _arch _envvar _cand _candidates
 
 # QEMU user-mode emulator per architecture (for Linux cross-arch testing)
-# Try both with and without -static suffix
-declare -A QEMU_USER=(
-    [riscv64]="qemu-riscv64"
-    [aarch64]="qemu-aarch64"
-    [loongarch64]="qemu-loongarch64"
+# Try both with and without -static suffix; also env override QEMU_<arch>
+declare -A QEMU_USER_CANDIDATES=(
+    [riscv64]="qemu-riscv64:qemu-riscv64-static"
+    [aarch64]="qemu-aarch64:qemu-aarch64-static"
+    [loongarch64]="qemu-loongarch64:qemu-loongarch64-static"
 )
+
+declare -A QEMU_USER=()
+for _arch in "${!QEMU_USER_CANDIDATES[@]}"; do
+    _envvar="QEMU_${_arch}"
+    if [[ -n "${!_envvar:-}" ]]; then
+        QEMU_USER[$_arch]="${!_envvar}"
+    else
+        IFS=':' read -ra _candidates <<< "${QEMU_USER_CANDIDATES[$_arch]}"
+        QEMU_USER[$_arch]=""
+        for _cand in "${_candidates[@]}"; do
+            if command -v "$_cand" &>/dev/null; then
+                QEMU_USER[$_arch]="$_cand"
+                break
+            fi
+        done
+    fi
+done
+unset _arch _envvar _cand _candidates
 
 # StarryOS target triple per architecture
 declare -A STARRY_TARGET=(

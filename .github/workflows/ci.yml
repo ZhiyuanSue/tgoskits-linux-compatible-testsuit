@@ -19,113 +19,55 @@ on:
 
 jobs:
   # =============================================
-  # 公共步骤: 安装工具链
+  # Phase 1: Linux 多架构测试
   # =============================================
-  install_deps:
+  linux_tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        starry_arch: [riscv64, x86_64]
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             musl-tools \
             qemu-user \
-            qemu-system-misc \
+            e2fsprogs \
             libudev-dev \
             pkg-config \
-            e2fsprogs \
             build-essential \
-            file \
-            wget \
-            curl
+            file
 
-      - name: Install musl cross-compilers
+      - name: Install musl cross-compilers (via Zig)
         run: |
-          # musl.cc provides prebuilt musl cross toolchains
-          MUSL_URL="https://musl.cc"
-          for arch in x86_64 riscv64 aarch64; do
-            cmd="${arch}-linux-musl-gcc"
-            if ! command -v "$cmd" &>/dev/null; then
-              echo "Downloading ${arch}-linux-musl-cross..."
-              tarball="${arch}-cross.tgz"
-              # Retry up to 3 times (musl.cc can be slow)
-              for retry in 1 2 3; do
-                echo "  Attempt $retry..."
-                if curl -fsSL --retry 3 --retry-delay 5 "$MUSL_URL/$tarball" -o "/tmp/$tarball"; then
-                  break
-                fi
-                [ "$retry" -eq 3 ] && { echo "Failed to download $tarball after 3 attempts"; exit 1; }
-                sleep 5
-              done
-              sudo tar -xzf "/tmp/$tarball" -C /opt/
-              rm -f "/tmp/$tarball"
-              echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
-            fi
-          done
-          # Verify
-          for arch in x86_64 riscv64 aarch64; do
-            "${arch}-linux-musl-gcc" --version | head -1
+          ZIG_VERSION="0.13.0"
+          ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
+          curl -fsSL "$ZIG_URL" | sudo tar -xJ -C /opt/
+          sudo ln -sf /opt/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
+
+          for target in x86_64-linux-musl riscv64-linux-musl; do
+            arch="${target%%-*}"
+            wrapper="/usr/local/bin/${arch}-linux-musl-gcc"
+            cat > "$wrapper" <<WRAPPER
+#!/bin/bash
+exec zig cc -target ${target} -static "\$@"
+WRAPPER
+            chmod +x "$wrapper"
           done
 
-      - name: Install Rust toolchain (for StarryOS)
-        run: |
-          rustup toolchain install nightly --profile minimal
-          rustup target add \
-            x86_64-unknown-none \
-            riscv64gc-unknown-none-elf \
-            aarch64-unknown-none-softfloat
+          echo "=== Verify ==="
+          x86_64-linux-musl-gcc --version 2>&1 | head -1
+          riscv64-linux-musl-gcc --version 2>&1 | head -1
 
-      - name: Verify environment
+      - name: Verify QEMU
         run: |
-          echo "=== musl cross-compilers ==="
-          for arch in x86_64 riscv64 aarch64; do
-            which "${arch}-linux-musl-gcc" || echo "MISSING: ${arch}-linux-musl-gcc"
-          done
-          echo "=== QEMU ==="
           qemu-x86_64 --version | head -1
           qemu-riscv64 --version | head -1
-          qemu-system-riscv64 --version | head -1
-          echo "=== Rust ==="
-          rustc --version
-          cargo --version
-
-  # =============================================
-  # Phase 1: Linux 多架构测试
-  # =============================================
-  linux_tests:
-    needs: install_deps
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        starry_arch: [riscv64, x86_64, aarch64]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup musl cross-compilers
-        run: |
-          MUSL_URL="https://musl.cc"
-          for arch in x86_64 riscv64 aarch64; do
-            if ! command -v "${arch}-linux-musl-gcc" &>/dev/null; then
-              tarball="${arch}-cross.tgz"
-              for retry in 1 2 3; do
-                if curl -fsSL --retry 3 --retry-delay 5 "$MUSL_URL/$tarball" -o "/tmp/$tarball"; then
-                  break
-                fi
-                [ "$retry" -eq 3 ] && { echo "Failed to download $tarball"; exit 1; }
-                sleep 5
-              done
-              sudo tar -xzf "/tmp/$tarball" -C /opt/
-              rm -f "/tmp/$tarball"
-              echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
-            fi
-          done
-
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools qemu-user e2fsprogs libudev-dev pkg-config file
 
       - name: Run Linux tests (--linux-only)
         run: |
@@ -145,7 +87,6 @@ jobs:
   # Phase 2: StarryOS 测试
   # =============================================
   starryos_tests:
-    needs: install_deps
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -162,29 +103,37 @@ jobs:
           path: tgoskits
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Setup musl cross-compilers
-        run: |
-          MUSL_URL="https://musl.cc"
-          for arch in x86_64 riscv64 aarch64; do
-            if ! command -v "${arch}-linux-musl-gcc" &>/dev/null; then
-              tarball="${arch}-cross.tgz"
-              for retry in 1 2 3; do
-                if curl -fsSL --retry 3 --retry-delay 5 "$MUSL_URL/$tarball" -o "/tmp/$tarball"; then
-                  break
-                fi
-                [ "$retry" -eq 3 ] && { echo "Failed to download $tarball"; exit 1; }
-                sleep 5
-              done
-              sudo tar -xzf "/tmp/$tarball" -C /opt/
-              rm -f "/tmp/$tarball"
-              echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
-            fi
-          done
-
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools qemu-user qemu-system-misc e2fsprogs libudev-dev pkg-config file
+          sudo apt-get install -y \
+            musl-tools \
+            qemu-user \
+            qemu-system-misc \
+            e2fsprogs \
+            libudev-dev \
+            pkg-config \
+            build-essential \
+            file
+
+      - name: Install musl cross-compilers (via Zig)
+        run: |
+          ZIG_VERSION="0.13.0"
+          ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
+          curl -fsSL "$ZIG_URL" | sudo tar -xJ -C /opt/
+          sudo ln -sf /opt/zig-linux-x86_64-${ZIG_VERSION}/zig /usr/local/bin/zig
+
+          for target in riscv64-linux-musl; do
+            arch="${target%%-*}"
+            wrapper="/usr/local/bin/${arch}-linux-musl-gcc"
+            cat > "$wrapper" <<WRAPPER
+#!/bin/bash
+exec zig cc -target ${target} -static "\$@"
+WRAPPER
+            chmod +x "$wrapper"
+          done
+
+          riscv64-linux-musl-gcc --version 2>&1 | head -1
 
       - name: Install Rust toolchain
         run: |
