@@ -48,7 +48,15 @@ jobs:
             if ! command -v "$cmd" &>/dev/null; then
               echo "Downloading ${arch}-linux-musl-cross..."
               tarball="${arch}-cross.tgz"
-              wget -q "$MUSL_URL/$tarball" -O "/tmp/$tarball"
+              # Retry up to 3 times (musl.cc can be slow)
+              for retry in 1 2 3; do
+                echo "  Attempt $retry..."
+                if curl -fsSL --retry 3 --retry-delay 5 "$MUSL_URL/$tarball" -o "/tmp/$tarball"; then
+                  break
+                fi
+                [ "$retry" -eq 3 ] && { echo "Failed to download $tarball after 3 attempts"; exit 1; }
+                sleep 5
+              done
               sudo tar -xzf "/tmp/$tarball" -C /opt/
               rm -f "/tmp/$tarball"
               echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
@@ -101,7 +109,13 @@ jobs:
           for arch in x86_64 riscv64 aarch64; do
             if ! command -v "${arch}-linux-musl-gcc" &>/dev/null; then
               tarball="${arch}-cross.tgz"
-              wget -q "$MUSL_URL/$tarball" -O "/tmp/$tarball"
+              for retry in 1 2 3; do
+                if curl -fsSL --retry 3 --retry-delay 5 "$MUSL_URL/$tarball" -o "/tmp/$tarball"; then
+                  break
+                fi
+                [ "$retry" -eq 3 ] && { echo "Failed to download $tarball"; exit 1; }
+                sleep 5
+              done
               sudo tar -xzf "/tmp/$tarball" -C /opt/
               rm -f "/tmp/$tarball"
               echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
@@ -154,7 +168,13 @@ jobs:
           for arch in x86_64 riscv64 aarch64; do
             if ! command -v "${arch}-linux-musl-gcc" &>/dev/null; then
               tarball="${arch}-cross.tgz"
-              wget -q "$MUSL_URL/$tarball" -O "/tmp/$tarball"
+              for retry in 1 2 3; do
+                if curl -fsSL --retry 3 --retry-delay 5 "$MUSL_URL/$tarball" -o "/tmp/$tarball"; then
+                  break
+                fi
+                [ "$retry" -eq 3 ] && { echo "Failed to download $tarball"; exit 1; }
+                sleep 5
+              done
               sudo tar -xzf "/tmp/$tarball" -C /opt/
               rm -f "/tmp/$tarball"
               echo "/opt/${arch}-cross/bin" >> $GITHUB_PATH
