@@ -10,9 +10,11 @@
  */
 
 #define _GNU_SOURCE
+#define _DEFAULT_SOURCE
 #include "test_framework.h"
 #include <signal.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <sys/syscall.h>
 #include <errno.h>
 #include <string.h>
@@ -52,8 +54,8 @@ static void sigalrm_handler(int sig) {
 
 /* SIGSEGV 处理函数（用于备用栈测试） */
 static volatile sig_atomic_t sigsegv_on_altstack = 0;
-static void sigsegv_handler(int sig) {
-    (void)sig;
+static void sigsegv_handler(int sig, siginfo_t *info, void *ucontext) {
+    (void)sig; (void)info; (void)ucontext;
     /* 检查是否在备用栈上 */
     stack_t ss;
     sigaltstack(NULL, &ss);
@@ -127,8 +129,8 @@ int main(void)
     }
 
     int status;
-    pid_t waited = wait4(fork_ret, &status, 0, NULL);
-    CHECK(waited == fork_ret, "rt_sigaction SIG_DFL: wait4 回收子进程");
+    pid_t waited = waitpid(fork_ret, &status, 0);
+    CHECK(waited == fork_ret, "rt_sigaction SIG_DFL: waitpid 回收子进程");
     CHECK(WIFSIGNALED(status), "rt_sigaction SIG_DFL: 子进程被信号终止");
     CHECK(WTERMSIG(status) == TEST_SIG, "rt_sigaction SIG_DFL: 终止信号为 SIGUSR1");
 
@@ -183,7 +185,7 @@ int main(void)
     sigaction(TEST_SIG2, &sa, NULL);
 
     signal_received = 0;
-    ret = syscall(SYS_tgkill, getpid(), gettid(), TEST_SIG2);
+    ret = syscall(SYS_tgkill, getpid(), (long)syscall(SYS_gettid), TEST_SIG2);
     CHECK(ret == 0, "tgkill 精确发送信号");
 
     usleep(10000);
@@ -206,7 +208,7 @@ int main(void)
         _exit(signal_received == TEST_SIG ? 0 : 1);
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "fork: 子进程继承信号处理，handler 被调用");
 
@@ -227,7 +229,7 @@ int main(void)
         _exit(is_member == 1 ? 0 : 1);
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "fork: 子进程继承信号屏蔽集");
 
@@ -298,7 +300,7 @@ int main(void)
         _exit(1);  /* 不应该到达这里 */
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "sigaltstack: SIGSEGV handler 在备用栈上执行");
 
@@ -334,7 +336,7 @@ int main(void)
         usleep(10000);
         kill(fork_ret, TEST_SIG);
 
-        waited = wait4(fork_ret, &status, 0, NULL);
+        waited = waitpid(fork_ret, &status, 0);
         CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
               "rt_sigsuspend: 原子等待信号，收到后恢复");
     }

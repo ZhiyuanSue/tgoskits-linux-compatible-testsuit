@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
+#include <sys/syscall.h>
 #include <signal.h>
 #include <errno.h>
 #include <sched.h>
@@ -45,7 +47,7 @@ int main(void)
     pid_t ppid = getppid();
     CHECK(ppid > 0, "getppid 返回正值(init为1)");
 
-    pid_t tid = gettid();
+    pid_t tid = (pid_t)syscall(SYS_gettid);
     CHECK(tid > 0, "gettid 返回正值");
 
     /* ================================================================
@@ -65,7 +67,7 @@ int main(void)
     CHECK(fork_ret > 0, "fork 在父进程返回子进程pid(正值)");
 
     int status = 0;
-    pid_t waited = wait4(fork_ret, &status, 0, NULL);
+    pid_t waited = waitpid(fork_ret, &status, 0);
     CHECK_RET(waited, fork_ret, "wait4 返回正确的子进程pid");
     CHECK(WIFEXITED(status), "子进程正常退出 (WIFEXITED)");
     CHECK_RET(WEXITSTATUS(status), 0, "子进程退出码为 0 (ppid校验通过)");
@@ -100,7 +102,7 @@ int main(void)
     }
 
     /* 等待子进程退出 */
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "fork fd 测试: 子进程通过继承的fd读到数据");
 
@@ -118,7 +120,7 @@ int main(void)
     close(fd);
 
     /* 子进程仍应能通过其继承的fd读取 */
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "fork fd 独立性: 父close后子进程的fd仍可用");
 
@@ -133,7 +135,7 @@ int main(void)
         _exit(global_var);
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 100,
           "fork 写时复制: 子进程修改 global_var 不影响父进程");
     CHECK(global_var == 42, "fork 写时复制: 父进程 global_var 仍为 42");
@@ -150,7 +152,7 @@ int main(void)
     }
 
     /* 父进程：WUNTRACED 等待子进程停止 */
-    waited = wait4(fork_ret, &status, WUNTRACED, NULL);
+    waited = waitpid(fork_ret, &status, WUNTRACED);
     CHECK(waited == fork_ret, "wait4 WUNTRACED: 返回子进程 pid");
     CHECK(WIFSTOPPED(status), "wait4 WUNTRACED: 子进程处于停止状态");
     CHECK(WSTOPSIG(status) == SIGSTOP, "wait4 WUNTRACED: 停止信号为 SIGSTOP");
@@ -159,13 +161,13 @@ int main(void)
     kill(fork_ret, SIGCONT);
 
     /* WCONTINUED: 等待子进程继续 */
-    waited = wait4(fork_ret, &status, WCONTINUED, NULL);
+    waited = waitpid(fork_ret, &status, WCONTINUED);
     if (waited == fork_ret) {
         CHECK(WIFCONTINUED(status), "wait4 WCONTINUED: WIFCONTINUED(status)==true");
     }
 
     /* 回收子进程 */
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status), "wait4: SIGCONT 后子进程正常退出");
 
     /* WNOHANG 非阻塞测试 */
@@ -176,12 +178,12 @@ int main(void)
     }
 
     /* 立即 wait4 WNOHANG，应返回 0（子进程尚未退出） */
-    waited = wait4(fork_ret, &status, WNOHANG, NULL);
+    waited = waitpid(fork_ret, &status, WNOHANG);
     CHECK(waited == 0, "wait4 WNOHANG: 子进程运行时返回 0（非阻塞）");
 
     /* 等待子进程退出 */
     sleep(2);
-    waited = wait4(fork_ret, &status, WNOHANG, NULL);
+    waited = waitpid(fork_ret, &status, WNOHANG);
     CHECK(waited == fork_ret, "wait4 WNOHANG: 子进程退出后返回 pid");
     CHECK(WIFEXITED(status), "wait4 WNOHANG: 子进程正常退出");
 
@@ -203,7 +205,7 @@ int main(void)
     int collected_count = 0;
     int collected_exit_codes[3] = {-1, -1, -1};
     for (int i = 0; i < 3; i++) {
-        waited = wait4(-1, &status, 0, NULL);
+        waited = waitpid(-1, &status, 0);
         if (waited > 0) {
             collected_count++;
             if (WIFEXITED(status)) {
@@ -252,7 +254,7 @@ int main(void)
               "clone CLONE_FILES: 父进程 read 到子进程写入的数据");
 
         /* 回收子进程 */
-        wait4(fork_ret, &status, 0, NULL);
+        waitpid(fork_ret, &status, 0);
     }
 
     close(pipefd[0]);
@@ -275,7 +277,7 @@ int main(void)
         /* 子进程 */
         _exit(0);
     } else if (fork_ret > 0) {
-        waited = wait4(fork_ret, &status, 0, NULL);
+        waited = waitpid(fork_ret, &status, 0);
         CHECK(WIFEXITED(status), "clone3: 子进程正常退出");
     } else {
         /* clone3 可能不支持，不视为失败 */
@@ -297,7 +299,7 @@ int main(void)
         _exit(1);
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status), "execve: 子进程正常退出");
     CHECK_RET(WEXITSTATUS(status), 0, "execve /bin/true: 退出码为 0");
 
@@ -323,7 +325,7 @@ int main(void)
         _exit(errno);
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "setsid: 成功创建新会话，getsid(0) == getpid()");
 
@@ -348,7 +350,7 @@ int main(void)
         _exit(1);
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "setpgid: setpgid(0,0) 返回 0，getpgid(0) == getpid()");
 
@@ -366,7 +368,7 @@ int main(void)
     /* 循环回收 5 个子进程，无 ECHILD */
     collected_count = 0;
     for (int i = 0; i < 5; i++) {
-        waited = wait4(-1, &status, 0, NULL);
+        waited = waitpid(-1, &status, 0);
         if (waited > 0) {
             collected_count++;
         }
@@ -392,7 +394,7 @@ int main(void)
     const char *parent_msg = "PARENT";
     pwrite(fd, parent_msg, strlen(parent_msg), 0);
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     close(fd);
 
     /* 验证文件包含两者数据 */
@@ -418,17 +420,17 @@ int main(void)
 
     /* 14.1 wait4 不存在的 pid */
     errno = 0;
-    CHECK_ERR(wait4(99999, &status, 0, NULL), ECHILD,
+    CHECK_ERR(waitpid(99999, &status, 0), ECHILD,
               "wait4 不存在的pid应返回 ECHILD");
 
     /* 14.2 wait4 -1 无子进程 */
     errno = 0;
-    CHECK_ERR(wait4(-1, &status, 0, NULL), ECHILD,
+    CHECK_ERR(waitpid(-1, &status, 0), ECHILD,
               "wait4 -1 无子进程应返回 ECHILD");
 
     /* 14.3 wait4 无效 options 位 */
     errno = 0;
-    waited = wait4(0, &status, 0x99999999, NULL);
+    waited = waitpid(0, &status, 0x99999999);
     /* Linux 可能忽略无效位，不强制报错 */
     if (waited == -1) {
         CHECK(errno == EINVAL, "wait4 无效 options 位 → EINVAL");
@@ -443,7 +445,7 @@ int main(void)
         _exit(errno == ENOENT ? 0 : 1);
     }
 
-    waited = wait4(fork_ret, &status, 0, NULL);
+    waited = waitpid(fork_ret, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "execve 不存在的文件 → ENOENT");
 

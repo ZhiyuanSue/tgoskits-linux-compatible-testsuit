@@ -13,6 +13,8 @@
 #include "test_framework.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/wait.h>
+#include <sys/syscall.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
@@ -101,7 +103,7 @@ static int test_tcp_basic(int use_cloexec, int use_nonblock)
         }
 
         int status;
-        wait4(pid, &status, 0, NULL);
+        waitpid(pid, &status, 0);
 
         close(conn_fd);
         close(listen_fd);
@@ -109,7 +111,7 @@ static int test_tcp_basic(int use_cloexec, int use_nonblock)
     }
 
     kill(pid, SIGKILL);
-    wait4(pid, NULL, 0, NULL);
+    waitpid(pid, NULL, 0);
     close(listen_fd);
     return -1;
 }
@@ -182,7 +184,7 @@ int main(void)
     CHECK(conn_fd >= 0, "accept4 成功，返回新 fd");
     if (conn_fd < 0) {
         kill(pid, SIGKILL);
-        wait4(pid, NULL, 0, NULL);
+        waitpid(pid, NULL, 0);
         TEST_DONE();
     }
 
@@ -211,7 +213,7 @@ int main(void)
 
     /* 9. 等待子进程结束 */
     int status;
-    pid_t waited = wait4(pid, &status, 0, NULL);
+    pid_t waited = waitpid(pid, &status, 0);
     CHECK_RET(waited, pid, "wait4 回收客户端子进程");
     CHECK(WIFEXITED(status), "客户端子进程正常退出");
     CHECK_RET(WEXITSTATUS(status), 0, "客户端子进程退出码为 0");
@@ -250,7 +252,7 @@ int main(void)
               "accept4 SOCK_CLOEXEC 设置成功");
         close(conn_fd);
     }
-    wait4(pid, NULL, 0, NULL);
+    waitpid(pid, NULL, 0);
     close(listen_fd);
 
     /* ================================================================

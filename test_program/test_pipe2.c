@@ -13,6 +13,7 @@
 #include "test_framework.h"
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/wait.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/wait.h>
@@ -85,7 +86,7 @@ int main(void)
     close(fds[1]);
 
     int status;
-    wait4(pid, &status, 0, NULL);
+    waitpid(pid, &status, 0);
     CHECK(WIFEXITED(status), "管道子进程正常退出");
     CHECK_RET(WEXITSTATUS(status), plen, "管道子进程读取到完整数据");
 
@@ -124,7 +125,7 @@ int main(void)
     write(fds[1], parent_data, strlen(parent_data));
     close(fds[1]);
 
-    wait4(pid, &status, 0, NULL);
+    waitpid(pid, &status, 0);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           "fork 管道通信数据精确匹配");
 
